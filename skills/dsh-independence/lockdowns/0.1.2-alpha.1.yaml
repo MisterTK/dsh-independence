@@ -1,0 +1,25 @@
+# Reviewed egress lockdown for deepseek-harness 0.1.2-alpha.1.
+# Method: manual audit of packages/bundle/*/cordis.patch.yml, the DeepSeek LLM
+# wire-extensions reference (docs/deepseek-llm-api-wire-extensions.md), and the
+# llm-deepseek adapter source, 2026-08-28.
+release: 0.1.2-alpha.1
+reviewed: "2026-08-28"
+notes: >
+  Base bundle ships session telemetry in FEEDBACK_ONLY mode against a hardcoded
+  collector (harness-telemetry.deepseeksvc.com); /feedback uploads raw unredacted
+  session records. Every deepseek-official request carries anonymous-user-id and
+  session-id headers plus the dsh_plugin_packages inventory field (on by default).
+  dsh_session_log ships mounted but disabled. web_search is pinned to DeepSeek.
+disable:
+  - id: session-telemetry-otel
+    reason: uploads raw session records to harness-telemetry.deepseeksvc.com (FEEDBACK_ONLY by default)
+  - id: llm-deepseek
+    reason: sends x-deepseek-harness-user-id / -session-id headers on every request
+  - id: plugin-package-inventory-deepseek
+    reason: "dsh_plugin_packages body field: active plugin inventory in every LLM request, on by default"
+  - id: session-log-deepseek
+    reason: "dsh_session_log body field: full session log inside LLM requests (off by default upstream; belt and braces)"
+  - id: web-search-deepseek
+    reason: web_search queries go to DeepSeek's Messages endpoint
+  - id: tool-web
+    reason: model-facing web tools; disabled rather than left pointing at a dead search seam
