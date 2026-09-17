@@ -148,10 +148,21 @@ def strings_in(value) -> list[str]:
 
 
 def source_files(repo: Path) -> list[Path]:
-    """Package source (src/ trees) — where default endpoints and wire fields live."""
+    """Source trees where default endpoints and wire fields live.
+
+    Two roots, for two different reasons. `packages/` holds the plugin rows the
+    lockdown can actually disable. `apps/` holds the entrypoints — cli, web,
+    desktop — whose egress no cordis row can gate at all: the desktop
+    mandatory-update policy and its Feishu SSO origins live there, outside the
+    plugin system. The patch layer cannot touch that code, which is precisely
+    why the snapshot has to watch it; an endpoint added under `apps/` is a
+    finding a human must act on, not one a `disabled: true` row can absorb.
+    """
     return [
         path
-        for path in (repo / "packages").rglob("*")
+        for root in (repo / "packages", repo / "apps")
+        if root.is_dir()
+        for path in root.rglob("*")
         if path.suffix in {".ts", ".tsx"} and "/src/" in path.as_posix()
     ]
 
@@ -189,10 +200,14 @@ def snapshot(repo: Path) -> dict[str, list[str]]:
         urls |= scan_urls(text)
         wire |= set(WIRE_EXT_RE.findall(text))
 
-    cli_src = repo / "apps" / "cli" / "src"
-    if cli_src.is_dir():
-        for file in cli_src.rglob("*.ts"):
-            knobs |= set(ENV_KNOB_RE.findall(file.read_text(encoding="utf-8", errors="replace")))
+    # Launch knobs from every app entrypoint, not just the cli: the switch that
+    # arms the desktop mandatory-update policy (and with it Feishu SSO) is a
+    # DSH_DESKTOP_* env var, so scoping this to apps/cli hid it entirely.
+    apps_dir = repo / "apps"
+    if apps_dir.is_dir():
+        for app_src in sorted(apps_dir.glob("*/src")):
+            for file in app_src.rglob("*.ts"):
+                knobs |= set(ENV_KNOB_RE.findall(file.read_text(encoding="utf-8", errors="replace")))
 
     # Suspect rows: flagged by name vocabulary or by carrying a non-benign URL in
     # config. Deliberately independent of the user's patch — the point is that a
