@@ -1,0 +1,78 @@
+# Reviewed egress lockdown for deepseek-harness 0.1.6-alpha.2.
+# Method: audit diff against the reviewed 0.1.2-alpha.1 baseline (3833 commits),
+# then manual triage of every new bundle row and every new hardcoded URL against
+# packages/bundle/*/cordis.patch.yml and the owning package sources, 2026-09-17.
+release: 0.1.6-alpha.2
+reviewed: "2026-09-17"
+notes: >
+  No new egress channel and no new disable since 0.1.2-alpha.1. The six rows below
+  still exist upstream and still do what they did: session-telemetry-otel keeps its
+  FEEDBACK_ONLY default against the hardcoded harness-telemetry.deepseeksvc.com
+  collector, and the wire-extension registry still has exactly two contributors
+  (dsh_plugin_packages, dsh_session_log), both reaching the network only through
+  llm-deepseek. No new dsh_* wire field and no new DSH_* knob in this release.
+
+  The one new hardcoded URL, https://api.deepseek.com/anthropic, is the
+  llm-deepseek Messages base URL plus a ui-settings-models display string — it
+  belongs to rows this lockdown already disables, so it is covered, not new
+  exposure.
+
+  Triaged and deliberately left enabled:
+
+  plugin-manager (@deepseek-ai/dsh-plugin-manager, base bundle, active whenever a
+  profile context exists) spawns pnpm — `pnpm install` and `pnpm view` — to manage
+  the profile's plugins, so it can reach the npm registry and pnpm's git/tarball
+  spec hosts. It is user-initiated only: the model-facing tool-plugin-manager row
+  ships `disabled: true` in both the base and web-app bundles, and the service is
+  inert until someone runs `dsh plugin ...`. Only package names travel, never
+  session or workspace content. Disable plugin-manager and tool-plugin-manager if
+  you want a machine that never contacts a package registry.
+
+  The remaining new rows are local-only infrastructure: invariants and the
+  *-invariant rows (assertions), ptc-runtime / workflow-ptc (local execution,
+  replacing the worker-thread rows), image-offload (swaps images for placeholders
+  in-context), mcp-resources (glue over already-configured MCP servers, no network
+  of its own), office-to-pdf (local @deepseek-ai/libreoffice-kit), workspace-changes
+  (git working-tree snapshots), and the web-app surface rows — file-upload,
+  resources, terminal-controller, workspace-files, open-in-app, session-turn-outline
+  and the ui-sidebar-* tabs — which are browser-to-local-host RPC.
+
+  Two items worth knowing that this file cannot gate:
+
+  ui-sidebar-browser (web-app bundle only) renders sandboxed HTTP(S) browser tabs.
+  That is a person driving a browser, not the harness phoning home, but it is a
+  live egress surface in the web app. It does not load in the headless/CLI path.
+
+  apps/desktop gained a mandatory-update policy that polls a configured origin and
+  can authenticate against Feishu SSO (open/accounts/passport/login.feishu.cn).
+  Reaching it requires ALL of: running the Electron desktop app; a policy config
+  supplied either by a packaged manifest key (dshMandatoryUpdatePolicy) or, when
+  unpackaged, the DSH_DESKTOP_MANDATORY_UPDATE_CONFIG env var; and that config
+  setting authentication to 'feishu-test'. Absent configuration disables policy
+  queries outright (resolveDesktopPolicyConfig(undefined) returns undefined), so
+  a source checkout never polls and never authenticates. It cannot be reached
+  from the CLI or headless profile at all.
+
+  No cordis row gates any of this — it is Electron main-process code, outside the
+  plugin system, so the patch layer is the wrong instrument. Detection is the
+  lever that works, and as of this review the snapshot covers it: source_files()
+  now scans apps/*/src alongside packages/**/src, and the launch-knob scan covers
+  every apps/*/src rather than apps/cli alone. That is what put the four feishu.cn
+  origins into urls.txt and DSH_DESKTOP_MANDATORY_UPDATE_CONFIG (plus the
+  DSH_DESKTOP_UPDATE_* family) into env-knobs.txt, where they are now baselined.
+  Any new endpoint or new arming switch under apps/ turns the audit red from here
+  on. To refuse the traffic rather than merely observe it, block the origins at
+  the network layer — the harness offers no switch for code it never loads.
+disable:
+  - id: session-telemetry-otel
+    reason: uploads raw session records to harness-telemetry.deepseeksvc.com (FEEDBACK_ONLY by default)
+  - id: llm-deepseek
+    reason: sends x-deepseek-harness-user-id / -session-id headers on every request
+  - id: plugin-package-inventory-deepseek
+    reason: "dsh_plugin_packages body field: active plugin inventory in every LLM request, on by default"
+  - id: session-log-deepseek
+    reason: "dsh_session_log body field: full session log inside LLM requests (off by default upstream; belt and braces)"
+  - id: web-search-deepseek
+    reason: web_search queries go to DeepSeek's Messages endpoint
+  - id: tool-web
+    reason: model-facing web tools; disabled rather than left pointing at a dead search seam
